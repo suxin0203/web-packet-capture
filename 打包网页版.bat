@@ -39,13 +39,19 @@ pyinstaller --onefile ^
     --hidden-import uvicorn.protocols.websockets.websockets_impl ^
     --hidden-import uvicorn.lifespan ^
     --hidden-import uvicorn.lifespan.on ^
-    --collect-all mitmproxy ^
-    --collect-all certifi ^
-    --collect-all cryptography ^
-    --collect-all pyOpenSSL ^
-    --collect-all fastapi ^
-    --collect-all uvicorn ^
-    --collect-all websockets ^
+    --exclude-module tkinter ^
+    --exclude-module _tkinter ^
+    --exclude-module test ^
+    --exclude-module unittest ^
+    --exclude-module pydoc_data ^
+    --exclude-module lib2to3 ^
+    --exclude-module setuptools ^
+    --exclude-module pkg_resources ^
+    --exclude-module numpy ^
+    --exclude-module PIL ^
+    --exclude-module pandas ^
+    --exclude-module scipy ^
+    --exclude-module matplotlib ^
     --console ^
     server.py
 
@@ -57,6 +63,7 @@ if %errorlevel% equ 0 (
     echo 分发文件（dist 目录）:
     echo   抓包工具网页版.exe
     echo   config.ini （配置文件，放exe旁边）
+    echo   操作手册.txt
     echo.
 ) else (
     echo.
