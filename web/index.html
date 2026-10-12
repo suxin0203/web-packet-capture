@@ -92,6 +92,17 @@
     font-family: var(--mono);
   }
   .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+  /* 带清空图标的输入框 */
+  .input-wrap { position: relative; display: flex; align-items: center; }
+  .input-wrap input { width: 100%; padding-right: 28px; }
+  .input-wrap .clear-btn {
+    position: absolute; right: 9px; width: 16px; height: 16px;
+    border: none; border-radius: 50%; background: #c7ccd4; color: #fff;
+    font-size: 11px; line-height: 15px; text-align: center; cursor: pointer;
+    display: none; padding: 0;
+  }
+  .input-wrap input:not(:placeholder-shown) + .clear-btn { display: block; }
+  .input-wrap .clear-btn:hover { background: #8b919b; }
   .actions { display: flex; gap: 8px; margin-left: 8px; }
   .btn {
     height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent;
@@ -298,15 +309,24 @@
 <section class="config">
   <div class="field">
     <label>URL 包含（留空抓全部）</label>
-    <input id="urlKw" spellcheck="false" placeholder="如 /api/login">
+    <div class="input-wrap">
+      <input id="urlKw" spellcheck="false" placeholder="如 /api/login">
+      <button class="clear-btn" data-target="urlKw" title="清空">×</button>
+    </div>
   </div>
   <div class="field">
     <label>Header 包含（如 Cookie、token）</label>
-    <input id="headerKw" spellcheck="false" placeholder="请求头名称，留空不启用">
+    <div class="input-wrap">
+      <input id="headerKw" spellcheck="false" placeholder="请求头名称，留空不启用">
+      <button class="clear-btn" data-target="headerKw" title="清空">×</button>
+    </div>
   </div>
   <div class="field">
     <label>内容包含（在请求体 / 响应体里搜关键字）</label>
-    <input id="bodyKw" placeholder="如 token、openid，留空不启用" spellcheck="false">
+    <div class="input-wrap">
+      <input id="bodyKw" placeholder="如 token、openid，留空不启用" spellcheck="false">
+      <button class="clear-btn" data-target="bodyKw" title="清空">×</button>
+    </div>
   </div>
   <div class="field small">
     <label>代理端口</label>
@@ -322,7 +342,10 @@
   <!-- 左：请求列表 -->
   <section class="list-pane">
     <div class="toolbar">
-      <input id="search" placeholder="🔍 搜索路径 / 域名 / 命中关键字…" spellcheck="false">
+      <div class="input-wrap" style="flex:1">
+        <input id="search" placeholder="🔍 搜索路径 / 域名 / 命中关键字…" spellcheck="false">
+        <button class="clear-btn" data-target="search" title="清空">×</button>
+      </div>
       <span class="count" id="count">0 条</span>
       <button class="btn ghost" id="exportBtn">导出 JSON</button>
       <button class="btn ghost" id="clearBtn">清空</button>
@@ -412,12 +435,12 @@ function hl(text){
 async function api(path, opts){ const r = await fetch(path, opts); return r.json(); }
 
 let toastTimer;
-function toast(msg){
+function toast(msg, ms){
   const t = $('toast');
   t.textContent = msg;
   t.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms || 2200);
 }
 
 function setVal(id, v){
@@ -636,6 +659,17 @@ $('copyDetail').onclick = () => {
   try { navigator.clipboard.writeText(curDetailText); } catch(e) {}
   toast('已复制当前内容');
 };
+/* 清空图标: 清空对应输入框并触发其原有逻辑 */
+document.querySelectorAll('.clear-btn').forEach(btn => {
+  btn.onclick = () => {
+    const el = $(btn.dataset.target);
+    el.value = '';
+    el.focus();
+    if (el.id === 'search') renderTable();
+    else { schedulePostConfig(); renderTable(); renderDetail(); }
+  };
+});
+
 $('search').oninput = renderTable;
 ['urlKw','headerKw','bodyKw'].forEach(id => {
   $(id).oninput = () => { schedulePostConfig(); renderTable(); renderDetail(); };
@@ -648,6 +682,8 @@ $('port').onchange = () => {
 $('startBtn').onclick = async () => {
   $('startBtn').disabled = true;
   await postConfig();
+  const certMissing = state && state.cert && !state.cert.installed;
+  if (certMissing) toast('首次运行：如 Windows 弹出证书确认框，请点「是」…', 4000);
   const r = await api('/api/start', {method: 'POST'});
   if (!r.ok) toast('启动失败：' + (r.error || '未知错误'));
   else toast((r.port_moved ? '默认端口被占，已自动顺延。' : '') + '抓包已开始，代理 127.0.0.1:' + r.proxy_port);
