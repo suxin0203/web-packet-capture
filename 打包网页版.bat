@@ -56,13 +56,15 @@ pyinstaller --onefile ^
     server.py
 
 if %errorlevel% equ 0 (
+    copy /y config.ini dist\config.ini >nul
+    copy /y docs\操作手册.txt dist\操作手册.txt >nul
     echo.
     echo ========================================
     echo 打包成功
     echo ========================================
     echo 分发文件（dist 目录）:
     echo   抓包工具网页版.exe
-    echo   config.ini （配置文件，放exe旁边）
+    echo   config.ini
     echo   操作手册.txt
     echo.
 ) else (
