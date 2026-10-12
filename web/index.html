@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>抓包助手</title>
+<style>
+  :root {
+    --bg: #f3f5f9;
+    --card: #ffffff;
+    --border: #e4e8ef;
+    --text: #1f2937;
+    --text2: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+    --green: #10b981;
+    --green-soft: #ecfdf5;
+    --red: #ef4444;
+    --orange: #f59e0b;
+    --mono: "Cascadia Code", Consolas, "Courier New", monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    min-width: 1180px;
+    overflow-x: auto;
+    font-size: 13px;
+  }
+
+  /* ===== 顶栏 ===== */
+  header {
+    height: 52px;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    flex-shrink: 0;
+  }
+  .logo { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .logo .ver { font-size: 11px; font-weight: 500; color: var(--accent); background: var(--accent-soft); padding: 2px 8px; border-radius: 10px; }
+  .status { display: flex; align-items: center; gap: 16px; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    background: var(--green-soft); color: #047857;
+  }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: blink 1.6s infinite; }
+  .pill.stopped { background: #f3f4f6; color: #6b7280; }
+  .pill.stopped .dot { background: #9ca3af; animation: none; }
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  .meta { font-size: 12px; color: var(--text2); background: none; border: none; cursor: default; font-family: inherit; }
+  .meta.ok::before { content: "✓"; color: var(--green); font-weight: 700; margin-right: 4px; }
+  .meta.warn { color: #b45309; cursor: pointer; }
+  .meta.warn::before { content: "⚠"; margin-right: 4px; }
+  .meta.btn-repair { cursor: pointer; color: var(--red); }
+  .meta.btn-repair:hover { text-decoration: underline; }
+  .meta.btn-exit { cursor: pointer; color: var(--red); font-weight: 600; border: 1px solid #fecaca; border-radius: 6px; padding: 3px 10px; }
+  .meta.btn-exit:hover { background: #fef2f2; }
+
+  /* 退出遮罩 */
+  .exit-overlay {
+    position: fixed; inset: 0; background: var(--bg); z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; font-size: 16px; color: var(--text);
+  }
+  .exit-overlay .big { font-size: 40px; }
+  .exit-overlay .sub { font-size: 13px; color: var(--text2); }
+
+  /* ===== 配置区 ===== */
+  .config {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+  .field.small { flex: 0 0 90px; }
+  .field label { font-size: 11px; color: var(--text2); font-weight: 600; }
+  .field input {
+    height: 32px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 0 10px; font-size: 13px; outline: none; transition: border .15s;
+    font-family: var(--mono);
+  }
+  .field input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+  .actions { display: flex; gap: 8px; margin-left: 8px; }
+  .btn {
+    height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.primary:hover:not(:disabled) { background: #1d4ed8; }
+  .btn.danger { background: #fff; color: var(--red); border-color: #fecaca; }
+  .btn.danger:hover:not(:disabled) { background: #fef2f2; }
+  .btn.ghost { background: transparent; color: var(--text2); border-color: var(--border); height: 28px; padding: 0 12px; font-size: 12px; }
+  .btn.ghost:hover:not(:disabled) { background: #f9fafb; color: var(--text); }
+
+  /* ===== 主区域 ===== */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 12px;
+    padding: 12px 20px;
+    min-height: 0;
+  }
+  .list-pane, .detail-pane {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  /* 列表工具栏 */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .toolbar input {
+    flex: 1; height: 28px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 0 10px; font-size: 12px; outline: none;
+  }
+  .toolbar input:focus { border-color: var(--accent); }
+  .count { font-size: 12px; color: var(--text2); white-space: nowrap; }
+
+  /* 表格 */
+  .table-wrap { flex: 1; overflow-y: auto; min-height: 0; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; background: #fafbfc; z-index: 1;
+    text-align: left; font-size: 11px; color: var(--text2); font-weight: 600;
+    padding: 8px 12px; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  tbody td { padding: 7px 12px; border-bottom: 1px solid #f1f3f7; font-size: 12px; }
+  tbody tr { cursor: pointer; transition: background .1s; }
+  tbody tr:hover { background: #f8fafc; }
+  tbody tr.active { background: var(--accent-soft); }
+  tbody tr.dim td { color: #b0b7c3; }
+  .empty-row td { text-align: center; color: #b0b7c3; padding: 40px 0; cursor: default; }
+  .m { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 4px; font-family: var(--mono); }
+  .m.GET { background: #ecfdf5; color: #059669; }
+  .m.POST { background: #eff4ff; color: #2563eb; }
+  .m.PUT { background: #fffbeb; color: #d97706; }
+  .m.DELETE { background: #fef2f2; color: #dc2626; }
+  .path { font-family: var(--mono); font-size: 12px; }
+  .st { font-family: var(--mono); font-weight: 700; }
+  .st.s2 { color: var(--green); }
+  .st.s3 { color: var(--orange); }
+  .st.s0, .st.s4, .st.s5 { color: var(--red); }
+  .hit {
+    display: inline-block; font-size: 11px; font-weight: 600;
+    background: #fef3c7; color: #92400e; padding: 1px 8px; border-radius: 10px;
+    font-family: var(--mono); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+  }
+  .hit.none { background: transparent; color: #c3c9d4; font-weight: 400; }
+
+  /* 详情 */
+  .detail-url {
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 12px; word-break: break-all;
+    background: #fafbfc; color: var(--text); flex-shrink: 0;
+    display: flex; align-items: center; gap: 8px; min-height: 41px;
+  }
+  .detail-url .placeholder { color: #b0b7c3; font-family: inherit; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .tabs button {
+    border: none; background: none; padding: 9px 16px; font-size: 12px; font-weight: 600;
+    color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent; transition: all .15s;
+  }
+  .tabs button:hover { color: var(--text); }
+  .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabs button#copyDetail { color: var(--accent); border-bottom: none; font-weight: 500; }
+  .tabs button#copyDetail:hover { background: var(--accent-soft); color: var(--accent); border-bottom: none; }
+  .detail-content {
+    flex: 1; overflow: auto; padding: 12px 14px; min-height: 0;
+    font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .detail-content .placeholder { color: #b0b7c3; font-family: system-ui, "Microsoft YaHei", sans-serif; }
+  .hrow { display: flex; gap: 8px; padding: 1px 0; }
+  .hk { color: #7c3aed; font-weight: 600; flex-shrink: 0; }
+  .hv { color: var(--text); }
+  mark { background: #fde047; color: #713f12; border-radius: 2px; padding: 0 1px; }
+
+  /* ===== 提取结果 ===== */
+  .extract {
+    margin: 0 20px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    flex-shrink: 0;
+  }
+  .extract-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; border-bottom: 1px solid var(--border);
+  }
+  .extract-title { font-weight: 700; font-size: 13px; }
+  .extract-rule { font-size: 12px; color: var(--text2); flex: 1; }
+  .extract-rule code { font-family: var(--mono); background: var(--accent-soft); color: var(--accent); padding: 1px 7px; border-radius: 4px; font-size: 11px; }
+  .extract-list {
+    display: flex; gap: 8px; padding: 10px 14px; overflow-x: auto;
+    min-height: 46px; align-items: center;
+  }
+  .extract-list .empty { color: #b0b7c3; font-size: 12px; }
+  .val-chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: #fafbfc; border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 6px 5px 10px; flex-shrink: 0; max-width: 420px;
+  }
+  .val-chip code {
+    font-family: var(--mono); font-size: 11px; color: var(--text);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .val-chip .copy {
+    border: none; background: var(--accent-soft); color: var(--accent);
+    font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 4px; cursor: pointer; flex-shrink: 0;
+  }
+  .val-chip .copy:hover { background: #dbe7fe; }
+
+  /* ===== 页脚署名 ===== */
+  .footer {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; gap: 18px;
+    padding: 8px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--card);
+    font-size: 12px; color: var(--text2);
+  }
+  .footer a { color: var(--accent); text-decoration: none; }
+  .footer a:hover { text-decoration: underline; }
+  .footer .qr-trigger {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: none; background: none; cursor: pointer;
+    font-size: 12px; color: var(--text2); font-family: inherit; padding: 2px 4px; border-radius: 4px;
+  }
+  .footer .qr-trigger:hover { background: var(--accent-soft); color: var(--accent); }
+  .footer .qr-trigger img { width: 22px; height: 22px; border-radius: 3px; border: 1px solid var(--border); }
+
+  /* 二维码弹窗 */
+  .modal-mask {
+    position: fixed; inset: 0; background: rgba(17,24,39,.45); z-index: 100;
+    display: none; align-items: center; justify-content: center;
+  }
+  .modal-mask.show { display: flex; }
+  .modal-card {
+    background: var(--card); border-radius: 12px; padding: 24px 28px;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    box-shadow: 0 16px 48px rgba(0,0,0,.25);
+  }
+  .modal-card .modal-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .modal-card img { width: 220px; height: 220px; border-radius: 8px; }
+  .modal-card .modal-gh { font-size: 12px; color: var(--accent); text-decoration: none; }
+  .modal-card .modal-gh:hover { text-decoration: underline; }
+  .modal-card .modal-close {
+    border: 1px solid var(--border); background: #f9fafb; color: var(--text2);
+    font-size: 12px; padding: 5px 18px; border-radius: 6px; cursor: pointer;
+  }
+  .modal-card .modal-close:hover { background: #f3f4f6; color: var(--text); }
+
+  /* Toast */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+    background: #111827; color: #fff; font-size: 13px; padding: 9px 20px;
+    border-radius: 8px; opacity: 0; transition: all .25s; pointer-events: none; z-index: 99;
+    box-shadow: 0 8px 24px rgba(0,0,0,.2);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📦 抓包助手 <span class="ver">网页版</span></div>
+  <div class="status">
+    <button class="meta btn-exit" id="exitBtn" title="停止抓包、恢复网络并退出服务">⏻ 退出程序</button>
+    <button class="meta btn-repair" id="repairBtn" title="紧急情况：浏览器打不开网页时点击">修复网络</button>
+    <button class="meta btn-repair" id="permBadge" style="display:none" title="组策略限制了代理设置权限">权限异常，点击以管理员重启</button>
+    <button class="meta warn" id="certBadge" title="点击安装证书">证书检查中…</button>
+    <span class="meta" id="proxyMeta">代理 --</span>
+    <span class="pill stopped" id="runPill"><span class="dot"></span><span id="runText">已停止</span></span>
+  </div>
+</header>
+
+<section class="config">
+  <div class="field">
+    <label>URL 包含（留空抓全部）</label>
+    <input id="urlKw" spellcheck="false" placeholder="如 /api/login">
+  </div>
+  <div class="field">
+    <label>Header 包含（如 Cookie、token）</label>
+    <input id="headerKw" spellcheck="false" placeholder="请求头名称，留空不启用">
+  </div>
+  <div class="field">
+    <label>内容包含（在请求体 / 响应体里搜关键字）</label>
+    <input id="bodyKw" placeholder="如 token、openid，留空不启用" spellcheck="false">
+  </div>
+  <div class="field small">
+    <label>代理端口</label>
+    <input id="port" spellcheck="false">
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="startBtn">▶ 开始抓包</button>
+    <button class="btn danger" id="stopBtn" disabled>■ 停止</button>
+  </div>
+</section>
+
+<main>
+  <!-- 左：请求列表 -->
+  <section class="list-pane">
+    <div class="toolbar">
+      <input id="search" placeholder="🔍 搜索路径 / 域名 / 命中关键字…" spellcheck="false">
+      <span class="count" id="count">0 条</span>
+      <button class="btn ghost" id="exportBtn">导出 JSON</button>
+      <button class="btn ghost" id="clearBtn">清空</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th style="width:72px">时间</th><th style="width:64px">方法</th><th>路径</th><th style="width:48px">状态</th><th style="width:120px">命中</th></tr>
+        </thead>
+        <tbody id="flowBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 右：详情 -->
+  <section class="detail-pane">
+    <div class="detail-url" id="detailUrl"><span class="placeholder">← 点击左侧任意请求查看详情</span></div>
+    <div class="tabs">
+      <button data-tab="reqHeaders" class="active">请求头</button>
+      <button data-tab="reqBody">请求体</button>
+      <button data-tab="resHeaders">响应头</button>
+      <button data-tab="resBody">响应体</button>
+      <button id="copyDetail" title="复制当前标签页内容" style="margin-left:auto">复制</button>
+    </div>
+    <div class="detail-content" id="detailContent"><span class="placeholder">等待选择请求…</span></div>
+  </section>
+</main>
+
+<!-- 底部：提取结果 -->
+<section class="extract">
+  <div class="extract-head">
+    <span class="extract-title">⭐ 提取结果</span>
+    <span class="extract-rule" id="extractRule">设置 Header 关键字后自动提取命中值，点击复制</span>
+    <span class="count" id="extractCount">0 个值</span>
+  </div>
+  <div class="extract-list" id="extractList"><span class="empty">暂无提取结果</span></div>
+</section>
+
+<!-- 页脚署名 -->
+<footer class="footer">
+  <span>作者 suxin</span>
+  <a href="https://github.com/suxin0203" target="_blank">GitHub @suxin0203</a>
+  <button class="qr-trigger" id="qrBtn" title="点击放大二维码">
+    <img src="/qrcode.jpg" alt="公众号">微信公众号
+  </button>
+</footer>
+
+<!-- 公众号二维码弹窗 -->
+<div class="modal-mask" id="qrModal">
+  <div class="modal-card">
+    <div class="modal-title">微信扫码关注公众号</div>
+    <img src="/qrcode.jpg" alt="公众号二维码">
+    <a href="https://github.com/suxin0203" target="_blank">GitHub: github.com/suxin0203</a>
+    <button class="modal-close" id="qrClose">关闭</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const MAX_UI_FLOWS = 500;
+
+let state = null;
+let flows = [];          // 服务器记录（含 id/ts）
+let selectedId = null;
+let curTab = 'reqHeaders';
+let curDetailText = '';  // 当前详情面板的纯文本，用于复制
+let ws = null;
+let configTimer = null;
+let stateRefreshing = false;
+let shuttingDown = false; // 退出流程中，阻止 WS 重连和误报
+let staleToastShown = false; // 启动自愈提示只弹一次
+
+/* ---------- 工具 ---------- */
+function esc(s){ return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function keywords(){
+  return [$('urlKw').value.trim(), $('headerKw').value.trim(), $('bodyKw').value.trim()].filter(Boolean);
+}
+function hl(text){
+  let out = esc(text);
+  for (const kw of keywords()) {
+    out = out.replace(new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'gi'), m => '<mark>'+m+'</mark>');
+  }
+  return out;
+}
+async function api(path, opts){ const r = await fetch(path, opts); return r.json(); }
+
+let toastTimer;
+function toast(msg){
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+function setVal(id, v){
+  const el = $(id);
+  if (document.activeElement !== el) el.value = v ?? '';
+}
+
+/* ---------- 状态 ---------- */
+async function refreshState(){
+  if (stateRefreshing) return;
+  stateRefreshing = true;
+  try {
+    state = await api('/api/state');
+    renderState();
+  } finally { stateRefreshing = false; }
+}
+
+function renderState(){
+  const running = state.running;
+  $('runPill').classList.toggle('stopped', !running);
+  $('runText').textContent = running ? '运行中' : '已停止';
+  $('startBtn').disabled = running;
+  $('stopBtn').disabled = !running;
+  $('proxyMeta').textContent = '代理 127.0.0.1:' + state.proxy_port;
+
+  const cert = state.cert || {};
+  const badge = $('certBadge');
+  if (cert.installed) { badge.textContent = '证书已安装'; badge.className = 'meta ok'; }
+  else if (!cert.file) { badge.textContent = '证书文件缺失(先跑一次开始抓包)'; badge.className = 'meta warn'; }
+  else { badge.textContent = '证书未安装，点击安装'; badge.className = 'meta warn'; }
+
+  const perm = $('permBadge');
+  if (state.perm_ok === false) {
+    perm.textContent = '无法控制系统代理，点击以管理员重启';
+    perm.className = 'meta btn-repair';
+    perm.style.display = '';
+  } else {
+    perm.style.display = 'none';
+  }
+  if (state.stale_repaired && !staleToastShown) {
+    staleToastShown = true;
+    toast('检测到上次异常退出残留的系统代理，已自动恢复网络');
+  }
+
+  setVal('urlKw', state.config.url_kw);
+  setVal('headerKw', state.config.header_kw);
+  setVal('bodyKw', state.config.body_kw);
+  setVal('port', state.config.proxy_port);
+  renderExtract();
+}
+
+/* ---------- 列表 / 详情 ---------- */
+function addFlow(rec){
+  flows.push(rec);
+  if (flows.length > MAX_UI_FLOWS) flows.shift();
+  renderTable();
+}
+
+function renderTable(){
+  const q = $('search').value.trim().toLowerCase();
+  const tb = $('flowBody');
+  tb.innerHTML = '';
+  const shown = flows.filter(f => {
+    if (!q) return true;
+    return (f.path + ' ' + f.host + ' ' + (f.hits||[]).join(' ')).toLowerCase().includes(q);
+  });
+  if (!shown.length) {
+    tb.innerHTML = '<tr class="empty-row"><td colspan="5">' +
+      (flows.length ? '没有匹配的记录'
+        : (keywords().length
+          ? '暂无数据 — 过滤条件可能太严（把请求都滤掉了），试试清空上方关键字；确认已点「▶ 开始抓包」'
+          : '暂无数据 — 点击「▶ 开始抓包」，然后在手机/小程序里操作目标页面')) +
+      '</td></tr>';
+  }
+  for (const f of shown.slice().reverse()) {
+    const tr = document.createElement('tr');
+    if (f.id === selectedId) tr.className = 'active';
+    if (!f.hits || !f.hits.length) tr.classList.add('dim');
+    const hits = (f.hits && f.hits.length) ? `<span class="hit" title="${esc(f.hits.join(', '))}">${esc(f.hits.join(', '))}</span>` : '<span class="hit none">—</span>';
+    tr.innerHTML = `
+      <td>${esc((f.ts||'').slice(11))}</td>
+      <td><span class="m ${esc(f.method)}">${esc(f.method)}</span></td>
+      <td><span class="path" title="${esc(f.url)}">${esc(f.path)}</span></td>
+      <td><span class="st s${String(f.status_code)[0]}">${f.status_code || 'ERR'}</span></td>
+      <td>${hits}</td>`;
+    tr.onclick = () => { selectedId = f.id; renderTable(); renderDetail(); };
+    tb.appendChild(tr);
+  }
+  $('count').textContent = flows.length + ' 条';
+  renderExtract();
+}
+
+function prettyBody(v){
+  /* 对象直接排版；字符串若长得像 JSON 也解析后排版，便于查看和选择复制 */
+  if (v == null) return '';
+  let text = typeof v === 'string' ? v : null;
+  if (text === null) {
+    try { return JSON.stringify(v, null, 2); } catch(e) { return String(v); }
+  }
+  const s = text.trim();
+  if (s && (s[0] === '{' || s[0] === '[')) {
+    try { return JSON.stringify(JSON.parse(s), null, 2); } catch(e) {}
+  }
+  return text;
+}
+
+function renderDetail(){
+  const f = flows.find(x => x.id === selectedId);
+  if (!f) {
+    $('detailUrl').innerHTML = '<span class="placeholder">← 点击左侧任意请求查看详情</span>';
+    $('detailContent').innerHTML = '<span class="placeholder">等待选择请求…</span>';
+    curDetailText = '';
+    return;
+  }
+  $('detailUrl').innerHTML = `<span class="m ${esc(f.method)}">${esc(f.method)}</span> ${hl(f.host + f.path)}`;
+  const c = $('detailContent');
+  if (curTab === 'reqHeaders' || curTab === 'resHeaders') {
+    const hs = curTab === 'reqHeaders' ? f.req_headers : f.res_headers;
+    const keys = Object.keys(hs || {});
+    curDetailText = keys.map(k => `${k}: ${hs[k]}`).join('\n');
+    c.innerHTML = keys.length
+      ? keys.map(k => `<div class="hrow"><span class="hk">${esc(k)}:</span><span class="hv">${hl(hs[k])}</span></div>`).join('')
+      : '<span class="placeholder">（空）</span>';
+  } else if (curTab === 'reqBody') {
+    curDetailText = prettyBody(f.req_body);
+    c.innerHTML = curDetailText ? hl(curDetailText) : '<span class="placeholder">（无请求体）</span>';
+  } else {
+    curDetailText = prettyBody(f.res_body);
+    c.innerHTML = curDetailText ? hl(curDetailText) : '<span class="placeholder">（无响应体）</span>';
+  }
+}
+
+/* ---------- 提取结果（按 Header 关键字，前端直接计算） ---------- */
+function renderExtract(){
+  const hkw = $('headerKw').value.trim();
+  const list = $('extractList');
+  const vals = [];
+  const seen = new Set();
+  if (hkw) {
+    for (let i = flows.length - 1; i >= 0 && vals.length < 6; i--) {
+      const h = (flows[i].req_headers || {})[hkw] ?? (flows[i].req_headers || {})[hkw.toLowerCase()];
+      if (h && !seen.has(h)) { seen.add(h); vals.push(h); }
+    }
+  }
+  $('extractCount').textContent = vals.length + ' 个值';
+  $('extractRule').innerHTML = hkw
+    ? `规则：<code>Header「${esc(hkw)}」</code>，命中后自动提取（显示最新 6 个）`
+    : '设置 Header 关键字后自动提取命中值，点击复制';
+  if (!vals.length) { list.innerHTML = '<span class="empty">暂无提取结果</span>'; return; }
+  list.innerHTML = '';
+  for (const v of vals) {
+    const chip = document.createElement('div');
+    chip.className = 'val-chip';
+    chip.innerHTML = `<code title="${esc(v)}">${esc(v)}</code><button class="copy">复制</button>`;
+    chip.querySelector('.copy').onclick = () => {
+      try { navigator.clipboard.writeText(v); } catch(e) {}
+      toast('已复制到剪贴板');
+    };
+    list.appendChild(chip);
+  }
+}
+
+/* ---------- WebSocket 实时推送 ---------- */
+function connectWS(){
+  if (shuttingDown) return;
+  try {
+    ws = new WebSocket(`ws://${location.host}/ws/live`);
+  } catch(e) { return; }
+  ws.onmessage = (e) => {
+    try { addFlow(JSON.parse(e.data)); } catch(err) {}
+  };
+  ws.onclose = () => { if (!shuttingDown) setTimeout(connectWS, 2000); };
+  ws.onerror = () => { try { ws.close(); } catch(e){} };
+}
+
+/* ---------- 配置保存（防抖，支持运行中实时生效） ---------- */
+function schedulePostConfig(){
+  clearTimeout(configTimer);
+  configTimer = setTimeout(postConfig, 500);
+}
+async function postConfig(){
+  const port = parseInt($('port').value, 10) || state.config.proxy_port;
+  const r = await api('/api/config', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      url_kw: $('urlKw').value,
+      header_kw: $('headerKw').value,
+      body_kw: $('bodyKw').value,
+      proxy_port: port,
+      enable_system_proxy: state ? state.enable_system_proxy : true,
+    }),
+  });
+  if (r.ok) { state = r.state; }
+  return r;
+}
+
+/* ---------- 交互绑定 ---------- */
+document.querySelectorAll('.tabs button[data-tab]').forEach(b => {
+  b.onclick = () => {
+    document.querySelectorAll('.tabs button[data-tab]').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    curTab = b.dataset.tab;
+    renderDetail();
+  };
+});
+$('copyDetail').onclick = () => {
+  if (!curDetailText) { toast('当前没有可复制的内容'); return; }
+  try { navigator.clipboard.writeText(curDetailText); } catch(e) {}
+  toast('已复制当前内容');
+};
+$('search').oninput = renderTable;
+['urlKw','headerKw','bodyKw'].forEach(id => {
+  $(id).oninput = () => { schedulePostConfig(); renderTable(); renderDetail(); };
+});
+$('port').onchange = () => {
+  schedulePostConfig();
+  toast(state && state.running ? '端口修改将在下次开始抓包时生效' : '端口已保存');
+};
+
+$('startBtn').onclick = async () => {
+  $('startBtn').disabled = true;
+  await postConfig();
+  const r = await api('/api/start', {method: 'POST'});
+  if (!r.ok) toast('启动失败：' + (r.error || '未知错误'));
+  else toast((r.port_moved ? '默认端口被占，已自动顺延。' : '') + '抓包已开始，代理 127.0.0.1:' + r.proxy_port);
+  await refreshState();
+};
+$('stopBtn').onclick = async () => {
+  $('stopBtn').disabled = true;
+  const r = await api('/api/stop', {method: 'POST'});
+  toast(r.ok ? '已停止，系统代理已恢复' : '停止失败');
+  await refreshState();
+};
+$('exportBtn').onclick = () => { location.href = '/api/export'; };
+$('clearBtn').onclick = async () => {
+  await api('/api/clear', {method: 'POST'});
+  flows = []; selectedId = null;
+  renderTable(); renderDetail();
+  toast('已清空（历史仍保留在 logs 目录的 jsonl 文件里）');
+};
+$('repairBtn').onclick = async () => {
+  await api('/api/repair', {method: 'POST'});
+  toast('已强制关闭系统代理，如仍打不开网页请重启浏览器');
+};
+$('certBadge').onclick = async () => {
+  toast('正在安装证书…');
+  const r = await api('/api/cert', {method: 'POST'});
+  toast(r.ok ? '证书已安装' : '安装失败，可访问 mitm.it 手动下载安装');
+  refreshState();
+};
+$('permBadge').onclick = async () => {
+  await api('/api/restart_admin', {method: 'POST'});
+  toast('正在以管理员身份重启，请在弹出的 UAC 窗口点"是"…');
+};
+$('exitBtn').onclick = async () => {
+  if (!confirm('退出程序将停止抓包、恢复网络设置并关闭服务，确定退出？')) return;
+  shuttingDown = true;
+  try { await fetch('/api/shutdown', {method: 'POST'}); } catch(e) {}
+  showExitOverlay();
+};
+/* 公众号二维码弹窗 */
+$('qrBtn').onclick = () => $('qrModal').classList.add('show');
+$('qrClose').onclick = () => $('qrModal').classList.remove('show');
+$('qrModal').onclick = (e) => { if (e.target === $('qrModal')) $('qrModal').classList.remove('show'); };
+function showExitOverlay(){
+  const div = document.createElement('div');
+  div.className = 'exit-overlay';
+  div.innerHTML = '<div class="big">✅</div><div>程序已退出，网络设置已恢复</div><div class="sub">现在可以关闭此标签页了</div>';
+  document.body.appendChild(div);
+}
+/* 抓包运行中误关标签页的二次确认（正常想退出直接点「退出程序」） */
+window.addEventListener('beforeunload', (e) => {
+  if (state && state.running && !shuttingDown) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+/* ---------- 启动 ---------- */
+(async function init(){
+  await refreshState();
+  if (state && state.stale_repaired) {
+    toast('检测到上次异常退出残留的系统代理，已自动恢复网络');
+  }
+  try {
+    flows = await api('/api/flows?after=0');
+  } catch(e) { flows = []; }
+  renderTable();
+  renderDetail();
+  connectWS();
+  setInterval(refreshState, 5000); // 兜底同步状态（如服务重启）
+})();
+</script>
+</body>
+</html>
