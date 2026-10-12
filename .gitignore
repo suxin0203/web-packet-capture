@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# 运行时产物（抓包数据可能含敏感信息，不入库）
+logs/*
+!logs/README.md
+
+# IDE / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
