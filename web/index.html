@@ -511,7 +511,7 @@ function renderTable(){
 }
 
 function prettyBody(v){
-  /* 对象直接排版；字符串若长得像 JSON 也解析后排版，便于查看和选择复制 */
+  /* 对象直接排版；字符串尝试识别 JSON / 表单体(k=v&k=v)，排版后展示 */
   if (v == null) return '';
   let text = typeof v === 'string' ? v : null;
   if (text === null) {
@@ -520,6 +520,13 @@ function prettyBody(v){
   const s = text.trim();
   if (s && (s[0] === '{' || s[0] === '[')) {
     try { return JSON.stringify(JSON.parse(s), null, 2); } catch(e) {}
+  }
+  if (/^[^\s&=]+=[^&]*(&[^\s&=]+=[^&]*)+$/.test(s)) {
+    try {
+      const obj = {};
+      for (const [k, val] of new URLSearchParams(s)) obj[k] = val;
+      return JSON.stringify(obj, null, 2);
+    } catch(e) {}
   }
   return text;
 }

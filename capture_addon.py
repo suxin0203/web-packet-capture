@@ -9,7 +9,9 @@ mitmproxy 抓包插件（网页版）
 """
 import json
 import logging
+import re
 from datetime import datetime
+from urllib.parse import parse_qsl
 
 from mitmproxy import http
 
@@ -17,6 +19,9 @@ from mitmproxy import http
 MAX_BODY_TEXT = 20000
 
 BINARY_MARKERS = ("image/", "video/", "audio/", "font/", "octet-stream")
+
+# 表单体形态: 键=值&键=值（至少两组，键为常规字符，不含空格/换行）
+_FORM_RE = re.compile(r"^[\w\-.%\[\]]+=[^&]*(&[\w\-.%\[\]]+=[^&]*)+$")
 
 log = logging.getLogger("capture")
 traffic = logging.getLogger("traffic")
@@ -40,10 +45,12 @@ def _console_line(flow: http.HTTPFlow) -> str:
 
 
 def decode_message(msg) -> tuple[str, object]:
-    """返回 (纯文本, 解析后的JSON或None)。二进制内容返回占位文本。
+    """返回 (纯文本, 解析后的结构化数据或None)。二进制内容返回占位文本。
 
-    JSON 识别不依赖 content-type：部分客户端发的 JSON 缺少正确头，
-    只要文本长得像 JSON 就尝试解析，解析成功则前端获得结构化数据用于排版。
+    智能识别两类常见格式（不依赖 Content-Type，很多客户端头是错的）：
+      - JSON: 以 { 或 [ 开头
+      - 表单体: 键=值&键=值（token/签名类接口常用这种）
+    解析成功则前端获得结构化数据用于排版。
     """
     if msg is None or not msg.content:
         return "", None
@@ -60,10 +67,23 @@ def decode_message(msg) -> tuple[str, object]:
             parsed = json.loads(text)
         except Exception:
             parsed = None
+    if parsed is None and "urlencoded" in ctype and len(raw) <= 200_000:
+        parsed = _parse_form(text)
+    if parsed is None and len(raw) <= 200_000 and _FORM_RE.match(stripped):
+        parsed = _parse_form(stripped)
 
     if len(text) > MAX_BODY_TEXT:
         text = text[:MAX_BODY_TEXT] + f"...(已截断，总长度 {len(text)})"
     return text, parsed
+
+
+def _parse_form(text: str):
+    """解析表单体为字典，失败返回 None"""
+    try:
+        pairs = parse_qsl(text.strip(), keep_blank_values=True)
+        return dict(pairs) if pairs else None
+    except Exception:
+        return None
 
 
 class CaptureAddon:
