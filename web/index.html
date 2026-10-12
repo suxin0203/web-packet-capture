@@ -63,6 +63,42 @@
   .meta.btn-repair:hover { text-decoration: underline; }
   .meta.btn-exit { cursor: pointer; color: var(--red); font-weight: 600; border: 1px solid #fecaca; border-radius: 6px; padding: 3px 10px; }
   .meta.btn-exit:hover { background: #fef2f2; }
+  .meta.btn-guide { cursor: pointer; color: var(--accent); font-weight: 600; border: 1px solid #c7dbfe; border-radius: 6px; padding: 3px 10px; }
+  .meta.btn-guide:hover { background: var(--accent-soft); }
+
+  /* 使用指南弹窗 */
+  .guide-mask {
+    position: fixed; inset: 0; background: rgba(17,24,39,.45); z-index: 100;
+    display: none; align-items: center; justify-content: center;
+  }
+  .guide-mask.show { display: flex; }
+  .guide-card {
+    background: var(--card); border-radius: 12px; padding: 22px 26px;
+    width: 560px; max-width: 92vw; max-height: 88vh; overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(0,0,0,.25);
+  }
+  .guide-card h2 { font-size: 15px; margin-bottom: 4px; }
+  .guide-card .sub { font-size: 12px; color: var(--text2); margin-bottom: 14px; }
+  .gstep { display: flex; gap: 10px; margin-bottom: 11px; align-items: flex-start; }
+  .gstep .num {
+    flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); color: #fff; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .gstep .txt { font-size: 13px; line-height: 1.55; }
+  .gstep .txt b { color: var(--text); }
+  .gstep .txt .dim { color: var(--text2); font-size: 12px; display: block; }
+  .gtips {
+    margin-top: 6px; padding: 9px 12px; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 8px; font-size: 12px; color: #92400e; line-height: 1.7;
+  }
+  .guide-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 16px; }
+  .guide-foot .hint { font-size: 11px; color: #9ca3af; }
+  .guide-foot button {
+    border: none; background: var(--accent); color: #fff; font-size: 13px; font-weight: 600;
+    padding: 8px 22px; border-radius: 6px; cursor: pointer;
+  }
+  .guide-foot button:hover { background: #1d4ed8; }
 
   /* 退出遮罩 */
   .exit-overlay {
@@ -311,6 +347,7 @@
 <header>
   <div class="logo">📦 抓包助手 <span class="ver">网页版</span></div>
   <div class="status">
+    <button class="meta btn-guide" id="guideBtn" title="快速上手指南">📖 使用指南</button>
     <button class="meta btn-exit" id="exitBtn" title="停止抓包、恢复网络并退出服务">⏻ 退出程序</button>
     <button class="meta btn-repair" id="repairBtn" title="紧急情况：浏览器打不开网页时点击">修复网络</button>
     <button class="meta btn-repair" id="permBadge" style="display:none" title="组策略限制了代理设置权限">权限异常，点击以管理员重启</button>
@@ -418,6 +455,22 @@
     <img src="/qrcode.jpg" alt="公众号">微信公众号
   </button>
 </footer>
+
+<!-- 使用指南弹窗 -->
+<div class="guide-mask" id="guideModal">
+  <div class="guide-card">
+    <h2>📖 三步上手</h2>
+    <div class="sub">第一次用？跟着下面走就行</div>
+    <div class="gstep"><span class="num">1</span><span class="txt"><b>点「▶ 开始抓包」</b>——首次会弹 Windows 证书确认框，点「是」（仅一次）<span class="dim">需要过滤就填上方的框：URL 包含 / Header 包含 / 内容包含，不填 = 抓全部，随时可改</span></span></div>
+    <div class="gstep"><span class="num">2</span><span class="txt"><b>去操作你的目标页面</b>（小程序 / 手机 / 网页），请求会实时出现在左侧列表<span class="dim">点任意一条看详情；关键字黄色高亮；底部「提取结果」一键复制 token/cookie</span></span></div>
+    <div class="gstep"><span class="num">3</span><span class="txt"><b>用完点右上角「⏻ 退出程序」</b>，网络自动恢复<span class="dim">黑色控制台窗口是抓包服务，抓包期间不要关它</span></span></div>
+    <div class="gtips">💡 小提示：断网点「修复网络」；抓包数据在 logs 目录；出问题把 logs/service.log 发给作者</div>
+    <div class="guide-foot">
+      <span class="hint">以后可随时点右上角「📖 使用指南」再次查看</span>
+      <button id="guideClose">知道了，开始使用</button>
+    </div>
+  </div>
+</div>
 
 <!-- 公众号二维码弹窗 -->
 <div class="modal-mask" id="qrModal">
@@ -758,6 +811,25 @@ $('exitBtn').onclick = async () => {
   try { await fetch('/api/shutdown', {method: 'POST'}); } catch(e) {}
   showExitOverlay();
 };
+/* 使用指南 */
+function openGuide(){ $('guideModal').classList.add('show'); }
+function closeGuide(){ $('guideModal').classList.remove('show'); }
+$('guideBtn').onclick = openGuide;
+$('guideClose').onclick = closeGuide;
+$('guideModal').onclick = (e) => { if (e.target === $('guideModal')) closeGuide(); };
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeGuide(); $('qrModal').classList.remove('show'); }
+});
+/* 首次使用自动弹出(浏览器本地记住, 关过一次就不再自动弹) */
+function maybeAutoShowGuide(){
+  try {
+    if (!localStorage.getItem('guide_shown_v1')) {
+      openGuide();
+      localStorage.setItem('guide_shown_v1', '1');
+    }
+  } catch(e) { openGuide(); }
+}
+
 /* 公众号二维码弹窗 */
 $('qrBtn').onclick = () => $('qrModal').classList.add('show');
 $('qrClose').onclick = () => $('qrModal').classList.remove('show');
@@ -788,6 +860,7 @@ window.addEventListener('beforeunload', (e) => {
   renderTable();
   renderDetail();
   connectWS();
+  maybeAutoShowGuide();
   setInterval(refreshState, 5000); // 兜底同步状态（如服务重启）
 })();
 </script>
