@@ -644,12 +644,15 @@ ACTUAL_WEB_PORT = [DEFAULT_WEB_PORT]
 
 @app.get("/")
 async def index():
-    return HTMLResponse((WEB_DIR / "index.html").read_text(encoding="utf-8"))
+    # no-cache: 程序升级后避免浏览器拿旧缓存的界面（HTML 内容小, 每次取新的没有开销）
+    return HTMLResponse((WEB_DIR / "index.html").read_text(encoding="utf-8"),
+                        headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/qrcode.jpg")
 async def qrcode_jpg():
-    return Response((WEB_DIR / "qrcode.jpg").read_bytes(), media_type="image/jpeg")
+    return Response((WEB_DIR / "qrcode.jpg").read_bytes(), media_type="image/jpeg",
+                    headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/state")

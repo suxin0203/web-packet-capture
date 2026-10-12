@@ -280,12 +280,18 @@
   .val-chip {
     display: inline-flex; align-items: center; gap: 8px;
     background: #fafbfc; border: 1px solid var(--border); border-radius: 6px;
-    padding: 5px 6px 5px 10px; flex-shrink: 0; max-width: 420px;
+    padding: 5px 6px 5px 10px; flex-shrink: 0; max-width: 420px; cursor: copy;
   }
+  .val-chip:hover { border-color: var(--accent); background: var(--accent-soft); }
   .val-chip code {
     font-family: var(--mono); font-size: 11px; color: var(--text);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+  .val-chip .src {
+    font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+  }
+  .val-chip .src-请求 { background: var(--accent-soft); color: var(--accent); }
+  .val-chip .src-响应 { background: var(--green-soft); color: #047857; }
   .val-chip .copy {
     border: none; background: var(--accent-soft); color: var(--accent);
     font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 4px; cursor: pointer; flex-shrink: 0;
@@ -366,14 +372,14 @@
     </div>
   </div>
   <div class="field">
-    <label>Header 包含（如 Cookie、token）</label>
+    <label>Header 包含（请求头 / 响应头名称）</label>
     <div class="input-wrap">
       <input id="headerKw" spellcheck="false" placeholder="请求头名称，留空不启用">
       <button class="clear-btn" data-target="headerKw" title="清空">×</button>
     </div>
   </div>
   <div class="field">
-    <label>内容包含（在请求体 / 响应体里搜关键字）</label>
+    <label>内容包含（在请求头值 / 请求体 / 响应体里搜）</label>
     <div class="input-wrap">
       <input id="bodyKw" placeholder="如 token、openid，留空不启用" spellcheck="false">
       <button class="clear-btn" data-target="bodyKw" title="清空">×</button>
@@ -671,25 +677,39 @@ function renderExtract(){
   const vals = [];
   const seen = new Set();
   if (hkw) {
+    const hkwLower = hkw.toLowerCase();
     for (let i = flows.length - 1; i >= 0 && vals.length < 6; i--) {
-      const h = (flows[i].req_headers || {})[hkw] ?? (flows[i].req_headers || {})[hkw.toLowerCase()];
-      if (h && !seen.has(h)) { seen.add(h); vals.push(h); }
+      const f = flows[i];
+      const fk = Object.keys(f.req_headers || {}).find(k => k.toLowerCase() === hkwLower);
+      if (fk && !seen.has(f.req_headers[fk])) {
+        seen.add(f.req_headers[fk]);
+        vals.push({ v: f.req_headers[fk], src: '请求' });
+      }
+      const rk = Object.keys(f.res_headers || {}).find(k => k.toLowerCase() === hkwLower);
+      if (rk && !seen.has(f.res_headers[rk])) {
+        seen.add(f.res_headers[rk]);
+        vals.push({ v: f.res_headers[rk], src: '响应' });
+      }
     }
   }
   $('extractCount').textContent = vals.length + ' 个值';
   $('extractRule').innerHTML = hkw
-    ? `规则：<code>Header「${esc(hkw)}」</code>，命中后自动提取（显示最新 6 个）`
+    ? `规则：<code>Header「${esc(hkw)}」</code> 的值（请求+响应头都搜，不区分大小写，最新 6 个）`
     : '设置 Header 关键字后自动提取命中值，点击复制';
   if (!vals.length) { list.innerHTML = '<span class="empty">暂无提取结果</span>'; return; }
   list.innerHTML = '';
-  for (const v of vals) {
+  const copyVal = (v) => {
+    try { navigator.clipboard.writeText(v); } catch(e) {}
+    toast('已复制值: ' + (v.length > 40 ? v.slice(0, 40) + '…' : v));
+  };
+  for (const item of vals) {
+    const v = item.v;
     const chip = document.createElement('div');
     chip.className = 'val-chip';
-    chip.innerHTML = `<code title="${esc(v)}">${esc(v)}</code><button class="copy">复制</button>`;
-    chip.querySelector('.copy').onclick = () => {
-      try { navigator.clipboard.writeText(v); } catch(e) {}
-      toast('已复制到剪贴板');
-    };
+    chip.title = '点击复制完整值';
+    chip.innerHTML = `<span class="src src-${item.src}">${item.src}</span><code title="${esc(v)}">${esc(v)}</code><button class="copy">复制</button>`;
+    chip.onclick = () => copyVal(v);          // 点整块也可复制
+    chip.querySelector('.copy').onclick = (e) => { e.stopPropagation(); copyVal(v); };
     list.appendChild(chip);
   }
 }
@@ -784,7 +804,7 @@ $('stopBtn').onclick = async () => {
   toast(r.ok ? '已停止，系统代理已恢复' : '停止失败');
   await refreshState();
 };
-$('exportBtn').onclick = () => { location.href = '/api/export'; };
+$('exportBtn').onclick = () => { internalNav = true; location.href = '/api/export'; };
 $('clearBtn').onclick = async () => {
   await api('/api/clear', {method: 'POST'});
   flows = []; selectedId = null;
@@ -840,9 +860,11 @@ function showExitOverlay(){
   div.innerHTML = '<div class="big">✅</div><div>程序已退出，网络设置已恢复</div><div class="sub">现在可以关闭此标签页了</div>';
   document.body.appendChild(div);
 }
-/* 抓包运行中误关标签页的二次确认（正常想退出直接点「退出程序」） */
+/* 抓包运行中误关标签页的二次确认（正常想退出直接点「退出程序」）。
+   程序内部跳转（导出 JSON 等）不触发 */
+let internalNav = false;
 window.addEventListener('beforeunload', (e) => {
-  if (state && state.running && !shuttingDown) {
+  if (state && state.running && !shuttingDown && !internalNav) {
     e.preventDefault();
     e.returnValue = '';
   }

@@ -91,8 +91,11 @@ class CaptureAddon:
         self.cfg = cfg    # SharedConfig，属性可被网页接口实时修改
         self.sink = sink  # callable(record: dict)
 
-    def _gate(self, flow: http.HTTPFlow):
-        """URL / Header 门控。通过返回 hits 列表，未通过返回 None。"""
+    def _gate(self, flow: http.HTTPFlow, include_response: bool = False):
+        """URL / Header 门控。通过返回 hits 列表，未通过返回 None。
+
+        Header 按名称匹配（不区分大小写）；include_response 时响应头也参与。
+        """
         hits = []
         if self.cfg.url_kw:
             if self.cfg.url_kw in flow.request.pretty_url:
@@ -100,7 +103,10 @@ class CaptureAddon:
             else:
                 return None
         if self.cfg.header_kw:
-            if self.cfg.header_kw in flow.request.headers:
+            found = self.cfg.header_kw in flow.request.headers
+            if not found and include_response and flow.response is not None:
+                found = self.cfg.header_kw in flow.response.headers
+            if found:
                 hits.append(self.cfg.header_kw)
             else:
                 return None
@@ -116,20 +122,28 @@ class CaptureAddon:
         traffic.info(_console_line(flow))
 
         try:
-            hits = self._gate(flow)
+            hits = self._gate(flow, include_response=True)
             if hits is None:
                 return
 
+            req, res = flow.request, flow.response
             req_text, req_json = decode_message(flow.request)
             res_text, res_json = decode_message(flow.response)
 
             if self.cfg.body_kw:
-                if self.cfg.body_kw in req_text or self.cfg.body_kw in res_text:
-                    hits.append(f"内容「{self.cfg.body_kw}」")
+                kw = self.cfg.body_kw
+                # 搜索范围: 请求体 + 响应体 + 请求头值 + 响应头值（token 可能藏在头的值里）
+                hay = "\n".join((
+                    req_text,
+                    res_text,
+                    " ".join(req.headers.values()),
+                    " ".join(res.headers.values()),
+                ))
+                if kw in hay:
+                    hits.append(f"内容「{kw}」")
                 else:
                     return
 
-            req, res = flow.request, flow.response
             self.sink({
                 "method": req.method,
                 "url": req.pretty_url,
