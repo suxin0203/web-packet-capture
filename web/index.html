@@ -104,6 +104,20 @@
   .input-wrap input:not(:placeholder-shown) + .clear-btn { display: block; }
   .input-wrap .clear-btn:hover { background: #8b919b; }
   .actions { display: flex; gap: 8px; margin-left: 8px; }
+  .switches { display: flex; flex-direction: column; gap: 3px; justify-content: center; }
+  .switch-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text2); cursor: pointer; white-space: nowrap; user-select: none; }
+  .switch-item input { accent-color: var(--accent); cursor: pointer; }
+  .adv { flex-shrink: 0; border-bottom: 1px solid var(--border); background: #fafbfd; }
+  .adv summary { cursor: pointer; padding: 5px 20px; font-size: 11px; color: var(--text2); user-select: none; }
+  .adv summary:hover { color: var(--accent); }
+  .adv-body { padding: 4px 20px 10px; display: flex; flex-direction: column; gap: 6px; }
+  .adv-hint { font-size: 11px; color: var(--text2); }
+  .adv-hint code { font-family: var(--mono); background: var(--accent-soft); color: var(--accent); padding: 1px 5px; border-radius: 3px; }
+  .adv-body textarea {
+    font-family: var(--mono); font-size: 12px; border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 10px; outline: none; resize: vertical; min-height: 52px;
+  }
+  .adv-body textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
   .btn {
     height: 32px; padding: 0 16px; border-radius: 6px; border: 1px solid transparent;
     font-size: 13px; font-weight: 600; cursor: pointer; transition: all .15s;
@@ -332,11 +346,23 @@
     <label>代理端口</label>
     <input id="port" spellcheck="false">
   </div>
+  <div class="switches">
+    <label class="switch-item" title="抓包时自动把系统代理指向本工具，退出时自动恢复"><input type="checkbox" id="chkProxy">自动设置系统代理</label>
+    <label class="switch-item" title="关闭所有网页标签页 10 秒后自动退出服务"><input type="checkbox" id="chkAutoExit">关网页自动退出</label>
+  </div>
   <div class="actions">
     <button class="btn primary" id="startBtn">▶ 开始抓包</button>
     <button class="btn danger" id="stopBtn" disabled>■ 停止</button>
   </div>
 </section>
+
+<details class="adv">
+  <summary>高级设置 · 请求头修改</summary>
+  <div class="adv-body">
+    <span class="adv-hint">发出的每个请求都会附加/覆盖这些请求头，每行一条「名称=值」，留空不启用。适合改 UA 等场景。</span>
+    <textarea id="headerModify" rows="3" spellcheck="false" placeholder="User-Agent=Mozilla/5.0 (iPhone; CPU iPhone OS 8_3 like Mac OS X)"></textarea>
+  </div>
+</details>
 
 <main>
   <!-- 左：请求列表 -->
@@ -489,6 +515,11 @@ function renderState(){
   setVal('headerKw', state.config.header_kw);
   setVal('bodyKw', state.config.body_kw);
   setVal('port', state.config.proxy_port);
+  const chk = (id, v) => { const el = $(id); if (document.activeElement !== el) el.checked = !!v; };
+  chk('chkProxy', state.enable_system_proxy);
+  chk('chkAutoExit', state.auto_shutdown);
+  const hm = $('headerModify');
+  if (document.activeElement !== hm) hm.value = state.header_modify_text || '';
   renderExtract();
 }
 
@@ -629,7 +660,7 @@ function schedulePostConfig(){
   configTimer = setTimeout(postConfig, 500);
 }
 async function postConfig(){
-  const port = parseInt($('port').value, 10) || state.config.proxy_port;
+  const port = parseInt($('port').value, 10) || (state ? state.config.proxy_port : 16823);
   const r = await api('/api/config', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -638,7 +669,9 @@ async function postConfig(){
       header_kw: $('headerKw').value,
       body_kw: $('bodyKw').value,
       proxy_port: port,
-      enable_system_proxy: state ? state.enable_system_proxy : true,
+      enable_system_proxy: $('chkProxy').checked,
+      auto_shutdown: $('chkAutoExit').checked,
+      header_modify: $('headerModify').value,
     }),
   });
   if (r.ok) { state = r.state; }
@@ -674,6 +707,9 @@ $('search').oninput = renderTable;
 ['urlKw','headerKw','bodyKw'].forEach(id => {
   $(id).oninput = () => { schedulePostConfig(); renderTable(); renderDetail(); };
 });
+['chkProxy','chkAutoExit'].forEach(id => $(id).onchange = schedulePostConfig);
+$('headerModify').oninput = schedulePostConfig;
+
 $('port').onchange = () => {
   schedulePostConfig();
   toast(state && state.running ? '端口修改将在下次开始抓包时生效' : '端口已保存');

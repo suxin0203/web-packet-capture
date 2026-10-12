@@ -336,7 +336,8 @@ ENGINE = Engine()
 
 
 # ---------------- Windows 系统代理 / 证书 ----------------
-_prev_proxy = None  # (ProxyEnable, ProxyServer) 记录开启前的状态，用于还原
+_prev_proxy = None      # (ProxyEnable, ProxyServer) 记录开启前的状态，用于还原
+_we_enabled_proxy = [False]  # 当前系统代理是否由本工具开启（退出时据此决定是否恢复）
 
 # 代理读写全部走 winreg + wininet 原生 API（毫秒级），
 # 早期版本用 PowerShell 子进程，冷启动一次要十几秒且偶发卡顿
@@ -391,11 +392,15 @@ def enable_proxy(port: int):
     global _prev_proxy
     _prev_proxy = read_proxy_reg()
     _set_proxy_reg(1, f"127.0.0.1:{port}")
+    _we_enabled_proxy[0] = True
     log.info("系统代理已开启: 127.0.0.1:%s (之前: %s)", port, _prev_proxy)
 
 
-def disable_proxy():
+def disable_proxy(force: bool = False):
     global _prev_proxy
+    if not _we_enabled_proxy[0] and not force:
+        return  # 不是我们开的代理(或已恢复过), 不动它
+    _we_enabled_proxy[0] = False
     prev = _prev_proxy
     _prev_proxy = None
     if prev and prev[0]:
@@ -600,8 +605,7 @@ def cleanup():
     try:
         ENGINE.stop()
     finally:
-        if CFG.enable_system_proxy:
-            disable_proxy()
+        disable_proxy()
 
 
 def _graceful_exit(delay: float = 0.8):
@@ -622,6 +626,8 @@ def state() -> dict:
         "perm_ok": _perm_ok[0],
         "stale_repaired": _stale_repaired[0],
         "enable_system_proxy": CFG.enable_system_proxy,
+        "auto_shutdown": CFG.auto_shutdown,
+        "header_modify_text": chr(10).join(f"{k}={v}" for k, v in CFG.header_modify.items()),
         "config": {
             "url_kw": CFG.url_kw,
             "header_kw": CFG.header_kw,
@@ -663,11 +669,21 @@ def api_config(
     body_kw: str = Body("", embed=True),
     proxy_port: int = Body(DEFAULT_PROXY_PORT, embed=True),
     enable_system_proxy: bool = Body(True, embed=True),
+    auto_shutdown: bool = Body(True, embed=True),
+    header_modify: str = Body("", embed=True),
 ):
     CFG.url_kw = url_kw.strip()
     CFG.header_kw = header_kw.strip()
     CFG.body_kw = body_kw.strip()
     CFG.enable_system_proxy = enable_system_proxy
+    CFG.auto_shutdown = auto_shutdown
+    hm = {}
+    for line in (header_modify or "").splitlines():
+        line = line.strip()
+        if line and "=" in line and not line.startswith("#"):
+            k, _, v = line.partition("=")
+            hm[k.strip()] = v.strip()
+    CFG.header_modify = hm
     log.info("配置更新: url=%r header=%r body=%r port=%s", CFG.url_kw, CFG.header_kw, CFG.body_kw, CFG.proxy_port)
     if not ENGINE.running and 1024 < proxy_port < 65536:
         CFG.proxy_port = proxy_port
@@ -696,8 +712,7 @@ def api_start():
 def api_stop():
     log.info("停止抓包")
     ENGINE.stop()
-    if CFG.enable_system_proxy:
-        disable_proxy()
+    disable_proxy()
     return {"ok": True, "state": state()}
 
 
