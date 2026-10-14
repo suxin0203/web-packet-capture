@@ -162,6 +162,26 @@
   .btn:disabled { opacity: .45; cursor: not-allowed; }
   .btn.primary { background: var(--accent); color: #fff; }
   .btn.primary:hover:not(:disabled) { background: #1d4ed8; }
+
+  /* 未启动时的引导动画: 呼吸光晕 + 向外扩散的波纹环 */
+  .btn.primary.attention { position: relative; animation: btn-breathe 2.4s ease-in-out infinite; }
+  .btn.primary.attention::after {
+    content: ""; position: absolute; inset: 0; border-radius: 6px;
+    border: 2px solid var(--accent); pointer-events: none;
+    animation: btn-ping 2.4s ease-out infinite;
+  }
+  @keyframes btn-breathe {
+    0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+    50% { transform: scale(1.04); box-shadow: 0 0 16px 3px rgba(37, 99, 235, 0.35); }
+  }
+  @keyframes btn-ping {
+    0% { transform: scale(1); opacity: .6; }
+    75%, 100% { transform: scale(1.45); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .btn.primary.attention { animation: none; }
+    .btn.primary.attention::after { animation: none; opacity: 0; }
+  }
   .btn.danger { background: #fff; color: var(--red); border-color: #fecaca; }
   .btn.danger:hover:not(:disabled) { background: #fef2f2; }
   .btn.ghost { background: transparent; color: var(--text2); border-color: var(--border); height: 28px; padding: 0 12px; font-size: 12px; }
@@ -549,6 +569,8 @@ function renderState(){
   $('runText').textContent = running ? '运行中' : '已停止';
   $('startBtn').disabled = running;
   $('stopBtn').disabled = !running;
+  // 引导动画只在"等待用户点击开始"时播放
+  $('startBtn').classList.toggle('attention', !running);
   $('proxyMeta').textContent = '代理 127.0.0.1:' + state.proxy_port;
 
   const cert = state.cert || {};
