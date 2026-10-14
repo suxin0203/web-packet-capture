@@ -99,6 +99,26 @@
     padding: 8px 22px; border-radius: 6px; cursor: pointer;
   }
   .guide-foot button:hover { background: #1d4ed8; }
+  .um-notes {
+    width: 100%; max-height: 38vh; overflow-y: auto;
+    background: #f9fafb; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; font-size: 12.5px; line-height: 1.8; color: var(--text);
+    text-align: left;
+  }
+  .um-notes .md-h { font-weight: 700; margin-top: 8px; color: var(--text); }
+  .um-notes .md-h:first-child { margin-top: 0; }
+  .um-notes .md-li { padding-left: 14px; position: relative; }
+  .um-notes .md-li::before { content: "•"; position: absolute; left: 2px; color: var(--accent); }
+  .um-skip {
+    border: 1px solid var(--border); background: #f9fafb; color: var(--text2);
+    font-size: 12px; padding: 7px 16px; border-radius: 6px; cursor: pointer;
+  }
+  .um-skip:hover { background: #f3f4f6; color: var(--text); }
+  .um-download {
+    background: var(--accent); color: #fff; text-decoration: none;
+    font-size: 13px; font-weight: 600; padding: 8px 22px; border-radius: 6px;
+  }
+  .um-download:hover { background: #1d4ed8; }
 
   /* 退出遮罩 */
   .exit-overlay {
@@ -528,6 +548,19 @@
   </div>
 </div>
 
+<!-- 更新提示弹窗 -->
+<div class="guide-mask" id="updateModal">
+  <div class="guide-card" style="width:500px">
+    <h2>🎉 发现新版本 <span id="umLatest"></span></h2>
+    <div class="sub">当前版本 v<span id="umLocal"></span> · 更新内容：</div>
+    <div class="um-notes" id="umNotes"></div>
+    <div class="guide-foot">
+      <button class="um-skip" id="umSkip">跳过此版本</button>
+      <a class="um-download" id="umDownload" href="#" target="_blank">前往下载 ↗</a>
+    </div>
+  </div>
+</div>
+
 <!-- 公众号二维码弹窗 -->
 <div class="modal-mask" id="qrModal">
   <div class="modal-card">
@@ -892,6 +925,24 @@ function cmpVer(a, b){
   }
   return 0;
 }
+function mdLite(md){
+  /* 极简 Markdown: 标题/列表/加粗, 够展示 Release notes 用 */
+  return esc(md).split('\n').map(line => {
+    if (line.startsWith('### ')) return '<div class="md-h">' + line.slice(4) + '</div>';
+    if (line.startsWith('## '))  return '<div class="md-h">' + line.slice(3) + '</div>';
+    if (line.startsWith('- '))   return '<div class="md-li">' + line.slice(2) + '</div>';
+    return line ? '<div>' + line + '</div>' : '';
+  }).join('').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+}
+let pendingLatest = '';
+function showUpdateModal(rel, latest, local){
+  pendingLatest = latest;
+  $('umLatest').textContent = latest;
+  $('umLocal').textContent = local;
+  $('umNotes').innerHTML = rel.body ? mdLite(rel.body) : '<span class="placeholder">暂无更新说明</span>';
+  $('umDownload').href = rel.html_url || ('https://github.com/suxin0203/web-packet-capture/releases/latest');
+  $('updateModal').classList.add('show');
+}
 async function checkUpdate(manual){
   try {
     const r = await fetch('https://api.github.com/repos/suxin0203/web-packet-capture/releases/latest', {cache: 'no-store'});
@@ -901,9 +952,14 @@ async function checkUpdate(manual){
     const local = (state && state.version) || '0';
     localStorage.setItem('last_update_check', String(Date.now()));
     if (cmpVer(latest, local) > 0) {
+      if (localStorage.getItem('update_skip') === latest) {
+        if (manual) toast('你已跳过 v' + latest);
+        return false;
+      }
+      // 弹窗提示(可选择性更新), 顶栏同时保留提醒
+      showUpdateModal(rel, latest, local);
       $('updateText').innerHTML = `🎉 发现新版本 <b>v${esc(latest)}</b>（当前 v${esc(local)}）`;
       $('updateBar').style.display = 'flex';
-      if (manual) toast(`发现新版本 v${latest}`);
       return true;
     }
     if (manual) toast('当前已是最新版本 ' + local);
@@ -925,6 +981,13 @@ function openGuide(){ $('guideModal').classList.add('show'); }
 function closeGuide(){ $('guideModal').classList.remove('show'); }
 $('guideBtn').onclick = openGuide;
 $('updateClose').onclick = () => { $('updateBar').style.display = 'none'; };
+$('umSkip').onclick = () => {
+  if (pendingLatest) localStorage.setItem('update_skip', pendingLatest);
+  $('updateModal').classList.remove('show');
+  $('updateBar').style.display = 'none';
+  toast('已跳过 v' + pendingLatest + '，下次新版本会再提醒');
+};
+$('umDownload').onclick = () => { $('updateModal').classList.remove('show'); };
 $('checkUpdateBtn').onclick = async () => { toast('正在检查更新…'); await checkUpdate(true); };
 $('guideClose').onclick = closeGuide;
 $('guideModal').onclick = (e) => { if (e.target === $('guideModal')) closeGuide(); };
