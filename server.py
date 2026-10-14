@@ -22,7 +22,7 @@ import warnings
 import webbrowser
 from logging.handlers import RotatingFileHandler
 
-__version__ = "2.1.0"
+__version__ = "2.1.1"
 
 # mitmproxy 10.2.4 在 cryptography 42 下打证书时会输出无害的弃用警告，别吓用户
 try:
@@ -751,6 +751,7 @@ def state() -> dict:
         "running": ENGINE.running,
         "proxy_port": ENGINE.port if ENGINE.running else CFG.proxy_port,
         "web_port": ACTUAL_WEB_PORT[0],
+        "version": __version__,
         "cert": dict(_cert_status),
         "perm_ok": _perm_ok[0],
         "stale_repaired": _stale_repaired[0],

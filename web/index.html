@@ -140,6 +140,26 @@
   .input-wrap input:not(:placeholder-shown) + .clear-btn { display: block; }
   .input-wrap .clear-btn:hover { background: #8b919b; }
   .actions { display: flex; gap: 8px; margin-left: 8px; }
+  /* 新版本提示条 */
+  .update-bar {
+    flex-shrink: 0; display: flex; align-items: center; gap: 12px;
+    background: linear-gradient(90deg, #eff6ff, #dbeafe);
+    border-bottom: 1px solid #bfdbfe; padding: 7px 20px;
+    font-size: 12.5px; color: #1e40af;
+  }
+  .update-bar a {
+    color: #fff; background: var(--accent); text-decoration: none;
+    font-size: 12px; font-weight: 600; padding: 3px 12px; border-radius: 12px;
+  }
+  .update-bar a:hover { background: #1d4ed8; }
+  .update-bar .ub-close {
+    margin-left: auto; border: none; background: none; cursor: pointer;
+    color: #1e40af; font-size: 15px; padding: 0 4px; opacity: .6;
+  }
+  .update-bar .ub-close:hover { opacity: 1; }
+  .footer .check-update { color: var(--text2); background: none; border: none; cursor: pointer; font-size: 12px; padding: 0; }
+  .footer .check-update:hover { color: var(--accent); text-decoration: underline; }
+
   .switches { display: flex; flex-direction: column; gap: 3px; justify-content: center; }
   .switch-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text2); cursor: pointer; white-space: nowrap; user-select: none; }
   .switch-item input { accent-color: var(--accent); cursor: pointer; }
@@ -383,6 +403,13 @@
   </div>
 </header>
 
+<!-- 新版本提示条 -->
+<div class="update-bar" id="updateBar" style="display:none">
+  <span id="updateText">🎉 发现新版本</span>
+  <a id="updateLink" href="https://github.com/suxin0203/web-packet-capture/releases/latest" target="_blank">前往下载 ↗</a>
+  <button class="ub-close" id="updateClose" title="关闭">×</button>
+</div>
+
 <section class="config">
   <div class="field">
     <label>URL 包含（留空抓全部）</label>
@@ -475,6 +502,9 @@
 
 <!-- 页脚署名 -->
 <footer class="footer">
+  <span id="localVer">v?</span>
+  <button class="check-update" id="checkUpdateBtn">检查更新</button>
+  <span>·</span>
   <span>作者 suxin</span>
   <a href="https://github.com/suxin0203" target="_blank">GitHub @suxin0203</a>
   <button class="qr-trigger" id="qrBtn" title="点击放大二维码">
@@ -853,10 +883,49 @@ $('exitBtn').onclick = async () => {
   try { await fetch('/api/shutdown', {method: 'POST'}); } catch(e) {}
   showExitOverlay();
 };
+/* 版本更新检测: GitHub Releases API, 只提示+跳转, 失败静默 */
+function cmpVer(a, b){
+  const pa = a.replace(/^v/, '').split('.').map(Number);
+  const pb = b.replace(/^v/, '').split('.').map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  }
+  return 0;
+}
+async function checkUpdate(manual){
+  try {
+    const r = await fetch('https://api.github.com/repos/suxin0203/web-packet-capture/releases/latest', {cache: 'no-store'});
+    if (!r.ok) throw new Error(r.status);
+    const rel = await r.json();
+    const latest = (rel.tag_name || '').replace(/^v/, '');
+    const local = (state && state.version) || '0';
+    localStorage.setItem('last_update_check', String(Date.now()));
+    if (cmpVer(latest, local) > 0) {
+      $('updateText').innerHTML = `🎉 发现新版本 <b>v${esc(latest)}</b>（当前 v${esc(local)}）`;
+      $('updateBar').style.display = 'flex';
+      if (manual) toast(`发现新版本 v${latest}`);
+      return true;
+    }
+    if (manual) toast('当前已是最新版本 ' + local);
+    return false;
+  } catch(e) {
+    if (manual) toast('检查更新失败（网络原因），稍后再试');
+    return false;
+  }
+}
+function maybeAutoCheck(){
+  try {
+    const last = Number(localStorage.getItem('last_update_check') || 0);
+    if (Date.now() - last > 4 * 3600 * 1000) checkUpdate(false);  // 4小时最多自动查一次
+  } catch(e) {}
+}
+
 /* 使用指南 */
 function openGuide(){ $('guideModal').classList.add('show'); }
 function closeGuide(){ $('guideModal').classList.remove('show'); }
 $('guideBtn').onclick = openGuide;
+$('updateClose').onclick = () => { $('updateBar').style.display = 'none'; };
+$('checkUpdateBtn').onclick = async () => { toast('正在检查更新…'); await checkUpdate(true); };
 $('guideClose').onclick = closeGuide;
 $('guideModal').onclick = (e) => { if (e.target === $('guideModal')) closeGuide(); };
 document.addEventListener('keydown', (e) => {
@@ -904,6 +973,8 @@ window.addEventListener('beforeunload', (e) => {
   renderTable();
   renderDetail();
   connectWS();
+  if (state && state.version) $('localVer').textContent = 'v' + state.version;
+  maybeAutoCheck();
   maybeAutoShowGuide();
   setInterval(refreshState, 5000); // 兜底同步状态（如服务重启）
 })();
