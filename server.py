@@ -415,6 +415,68 @@ CERT_DIR = Path.home() / ".mitmproxy"
 CERT_FILE = CERT_DIR / "mitmproxy-ca-cert.cer"
 _cert_status = {"file": False, "installed": False}
 
+
+def ensure_cert_file() -> bool:
+    """确保 CA 证书文件存在。首次运行时引擎还没跑过, 这里用 mitmproxy API
+    直接生成, 让"启动即安装"成为可能(不用先点一次抓包)。"""
+    if CERT_FILE.exists():
+        return True
+    try:
+        CERT_DIR.mkdir(exist_ok=True)
+        from mitmproxy.certs import CertStore
+        CertStore.from_store(str(CERT_DIR), "mitmproxy", 2048)
+        ok = CERT_FILE.exists()
+        log.info("CA 证书文件已生成: %s", CERT_FILE)
+        return ok
+    except Exception:
+        log.exception("生成 CA 证书文件失败")
+        return False
+
+
+def is_admin() -> bool:
+    try:
+        import ctypes
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _bring_cert_dialog_front():
+    """Windows 的证书确认框经常被压在浏览器后面看不见,
+    这里在 8 秒内轮询找到「安全警告」窗口并强制置顶+抢前台。"""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    targets = ("安全警告", "security warning")
+    found_hwnds = []
+
+    EnumProc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def _cb(hwnd, lparam):
+        if user32.IsWindowVisible(hwnd):
+            buf = ctypes.create_unicode_buffer(128)
+            user32.GetWindowTextW(hwnd, buf, 128)
+            title = buf.value.strip().lower()
+            if any(t in title for t in targets):
+                found_hwnds.append(hwnd)
+        return True
+
+    deadline = time.time() + 8
+    while time.time() < deadline and not found_hwnds:
+        user32.EnumWindows(EnumProc(_cb), 0)
+        time.sleep(0.3)
+
+    for hwnd in found_hwnds:
+        SW_RESTORE, SWP_FLAGS = 9, 0x0057  # SWP_NOMOVE|NOSIZE|SHOWWINDOW
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, SWP_FLAGS)   # HWND_TOPMOST
+        user32.SetWindowPos(hwnd, -2, 0, 0, 0, 0, SWP_FLAGS)   # HWND_NOTOPMOST
+        user32.SetForegroundWindow(hwnd)
+    if found_hwnds:
+        log.info("证书确认框已置顶 (%s 个窗口)", len(found_hwnds))
+
 # 本工具使用的端口段：启动自愈只清理指向这个段的残留代理，
 # 避免误伤用户手动配置的其他代理（如公司 VPN）
 OUR_PORT_RANGE = (16800, 16999)
@@ -440,10 +502,14 @@ def refresh_cert_status():
     out = run_powershell(f"""
     try {{
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{CERT_FILE}')
-        $store = New-Object System.Security.Cryptography.X509Certificates.X509Store('Root', 'CurrentUser')
-        $store.Open('ReadOnly')
-        $found = $store.Certificates | Where-Object {{ $_.Thumbprint -eq $cert.Thumbprint }}
-        $store.Close()
+        $found = $false
+        foreach ($p in @('Cert:\CurrentUser\Root', 'Cert:\LocalMachine\Root')) {{
+            if (Test-Path $p) {{
+                if (Get-ChildItem $p -ErrorAction SilentlyContinue | Where-Object {{ $_.Thumbprint -eq $cert.Thumbprint }}) {{
+                    $found = $true; break
+                }}
+            }}
+        }}
         if ($found) {{ Write-Host 'INSTALLED' }} else {{ Write-Host 'MISSING' }}
     }} catch {{ Write-Host 'ERROR' }}
     """)
@@ -451,9 +517,31 @@ def refresh_cert_status():
 
 
 def install_certificate() -> bool:
-    if not CERT_FILE.exists():
+    """安装 mitmproxy CA 证书。
+
+    - 管理员身份: certutil 静默装到机器级根存储, 全程无弹窗
+    - 普通身份: 装到当前用户根存储, Windows 会弹一次确认框(自动置顶)
+    """
+    if not ensure_cert_file():
         refresh_cert_status()
         return _cert_status["installed"]
+
+    if is_admin():
+        try:
+            r = subprocess.run(["certutil", "-addstore", "-f", "Root", str(CERT_FILE)],
+                               capture_output=True, text=True, timeout=30)
+            ok = (r.returncode == 0)
+            log.info("证书静默安装到机器级存储(管理员): %s", "成功" if ok else f"失败 rc={r.returncode}")
+        except Exception:
+            log.exception("机器级证书安装异常")
+            ok = False
+        if ok:
+            refresh_cert_status()
+            return True
+        log.info("机器级安装失败, 回退到用户级安装")
+
+    log.info("以当前用户安装证书 (Windows 会弹一次确认框, 已自动置顶)")
+    threading.Thread(target=_bring_cert_dialog_front, daemon=True).start()
     out = run_powershell(f"""
     try {{
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2('{CERT_FILE}')
@@ -828,12 +916,17 @@ def _startup_checks():
         healed = heal_stale_proxy()
         if healed:
             print("  [自愈] 检测到上次异常退出残留的系统代理，已自动恢复网络")
+        ensure_cert_file()
         refresh_cert_status()
         check_permission()
+        # 启动即装证书: 用户双击打开时确认框就在眼前, 而不是点抓包后才冒出来
+        if CFG.enable_system_proxy and not _cert_status["installed"]:
+            log.info("检测到证书未安装, 自动开始安装...")
+            install_certificate()
         if not _perm_ok[0]:
             print("  [权限] 无法修改系统代理设置，请在网页界面点击'以管理员重启'")
     except Exception:
-        pass
+        log.exception("启动检查异常")
 
 
 def main():
