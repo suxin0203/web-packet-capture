@@ -115,6 +115,10 @@ WEB_PORT={web_port}
 # 开始抓包时自动设置系统代理：1=自动 0=手动（不改动系统设置）
 ENABLE_SYSTEM_PROXY={esp}
 
+# 启动时自动请求管理员权限(弹一次UAC)：1=开启 0=关闭
+# 管理员模式下证书静默安装, 全程无弹窗
+RUN_AS_ADMIN={run_as_admin}
+
 # 关闭所有网页标签页后 10 秒自动退出服务并恢复网络：1=启用 0=后台常驻
 AUTO_SHUTDOWN_WHEN_NO_BROWSER={auto_shutdown}
 
@@ -134,6 +138,7 @@ class SharedConfig:
         self.web_port = DEFAULT_WEB_PORT
         self.enable_system_proxy = True
         self.auto_shutdown = True
+        self.run_as_admin = True
         self.header_modify = {}
 
     def load(self):
@@ -157,6 +162,7 @@ class SharedConfig:
             self.web_port = DEFAULT_WEB_PORT
         self.enable_system_proxy = s.get("ENABLE_SYSTEM_PROXY", "1").strip() != "0"
         self.auto_shutdown = s.get("AUTO_SHUTDOWN_WHEN_NO_BROWSER", "1").strip() != "0"
+        self.run_as_admin = s.get("RUN_AS_ADMIN", "1").strip() != "0"
         if "HeaderModify" in cp:
             self.header_modify = dict(cp["HeaderModify"])
 
@@ -172,7 +178,7 @@ class SharedConfig:
                 proxy_port=self.proxy_port,
                 web_port=self.web_port,
                 esp=1 if self.enable_system_proxy else 0,
-                auto_shutdown=1 if self.auto_shutdown else 0,
+                run_as_admin=1 if self.run_as_admin else 0,
                 header_modify="\n".join(hm_lines) if hm_lines else "",
             ),
             encoding="utf-8",
@@ -439,6 +445,40 @@ def is_admin() -> bool:
         return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
         return False
+
+
+def try_elevate() -> bool:
+    """弹 UAC 以管理员身份重启自身。
+
+    返回 True = 已发起提权重启(当前进程应立即退出);
+    返回 False = 用户拒绝了 UAC 或提权失败, 可以普通权限继续。
+    """
+    try:
+        import ctypes
+        if getattr(sys, "frozen", False):
+            exe, params = sys.executable, ""
+        else:
+            exe, params = sys.executable, f'"{BASE_DIR / "server.py"}"'
+        # ShellExecuteW 的 "runas" 动词会触发 UAC, 阻塞到用户选择为止
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", exe, params, str(BASE_DIR), 1)  # SW_SHOWNORMAL
+        return ret > 32
+    except Exception:
+        log.exception("提权重启失败")
+        return False
+
+
+def wait_port_free(port: int, timeout: float) -> bool:
+    """等待端口变为可用(自提权重启时旧实例退出有短暂竞态), 超时返回 False"""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return True
+            except OSError:
+                time.sleep(0.15)
+    return False
 
 
 def _bring_cert_dialog_front():
@@ -937,9 +977,20 @@ def main():
 
     setup_logging()
     import platform
+
+    # 自动提权: 非管理员且开启 RUN_AS_ADMIN 时, 弹 UAC 以管理员重启
+    # (管理员模式下证书静默安装, 全程无弹窗; UAC 被拒绝则普通权限继续)
+    if sys.platform.startswith("win") and CFG.run_as_admin and not is_admin():
+        log.info("正在请求管理员权限 (用于证书静默安装), 请在 UAC 中点「是」...")
+        if try_elevate():
+            print("  已以管理员身份重启, 本窗口可以关闭")
+            time.sleep(0.8)
+            return
+        print("  未获得管理员权限, 以普通权限继续 (证书将用确认框方式安装)")
+
     log.info("=" * 46)
     log.info("抓包助手 v%s 启动", __version__)
-    log.info("系统: %s | Python: %s", platform.platform(), platform.python_version())
+    log.info("系统: %s | Python: %s | 管理员: %s", platform.platform(), platform.python_version(), is_admin())
     log.info("工作目录: %s", BASE_DIR)
     log.info("配置: url=%r header=%r body=%r | 代理端口=%s 界面端口=%s | 自动系统代理=%s | 网页关闭自动退出=%s",
              CFG.url_kw, CFG.header_kw, CFG.body_kw, CFG.proxy_port, CFG.web_port,
@@ -948,7 +999,10 @@ def main():
     # 证书/权限/自愈检查涉及 PowerShell 调用（冷启动可能数秒），放后台线程，
     # 让网页界面先秒开；前端每 5 秒轮询状态会自动拿到结果
     threading.Thread(target=_startup_checks, daemon=True).start()
-    web_port = pick_free_port(CFG.web_port)
+    if wait_port_free(CFG.web_port, timeout=6):
+        web_port = CFG.web_port
+    else:
+        web_port = pick_free_port(CFG.web_port)
     ACTUAL_WEB_PORT[0] = web_port
 
     url = f"http://127.0.0.1:{web_port}"
@@ -964,6 +1018,8 @@ def main():
     print("  GitHub : https://github.com/suxin0203")
     print("  公众号  : 打开网页, 点右下角二维码扫码关注")
     print("=" * 56)
+    if is_admin():
+        print("  [管理员模式] 证书将静默安装, 无任何弹窗")
     if not _perm_ok[0]:
         print("  [权限] 无法修改系统代理设置，请在网页界面点击'以管理员重启'")
 

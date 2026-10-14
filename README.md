@@ -42,6 +42,8 @@
 
 从 [Releases](https://github.com/suxin0203/web-packet-capture/releases) 下载压缩包，解压后双击 `抓包工具网页版.exe` 即可。
 
+> 双击后若弹出 UAC（用户账户控制）窗口点「是」→ 以管理员运行，**证书静默安装全程无弹窗**；点「否」也能正常使用（证书走一次确认框）。不想要 UAC 可在 `config.ini` 设 `RUN_AS_ADMIN=0`。
+
 ### 方式二：源码运行
 
 ```bash
@@ -122,6 +124,7 @@ mitmproxy 引擎 (capture_addon.py, 127.0.0.1:16823)
 | `PROXY_PORT` / `WEB_PORT` | 16823 / 16824 | 被占用自动顺延 |
 | `ENABLE_SYSTEM_PROXY` | 1 | 0 = 不自动改系统代理（手机手动配代理场景） |
 | `AUTO_SHUTDOWN_WHEN_NO_BROWSER` | 1 | 0 = 关网页后服务常驻（挂机抓包） |
+| `RUN_AS_ADMIN` | 1 | 0 = 启动时不请求管理员权限（不弹 UAC） |
 
 ## ❓ 常见问题
 
