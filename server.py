@@ -179,6 +179,7 @@ class SharedConfig:
                 web_port=self.web_port,
                 esp=1 if self.enable_system_proxy else 0,
                 run_as_admin=1 if self.run_as_admin else 0,
+                auto_shutdown=1 if self.auto_shutdown else 0,
                 header_modify="\n".join(hm_lines) if hm_lines else "",
             ),
             encoding="utf-8",
