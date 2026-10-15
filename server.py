@@ -344,7 +344,6 @@ ENGINE = Engine()
 
 # ---------------- Windows 系统代理 / 证书 ----------------
 _prev_proxy = None      # (ProxyEnable, ProxyServer) 记录开启前的状态，用于还原
-_we_enabled_proxy = [False]  # 当前系统代理是否由本工具开启（退出时据此决定是否恢复）
 
 # 代理读写全部走 winreg + wininet 原生 API（毫秒级），
 # 早期版本用 PowerShell 子进程，冷启动一次要十几秒且偶发卡顿
@@ -397,25 +396,50 @@ def _set_proxy_reg(enable: int, server: str = ""):
 
 def enable_proxy(port: int):
     global _prev_proxy
-    _prev_proxy = read_proxy_reg()
+    prev = read_proxy_reg()
+    # 防御: 开启前若已有指向死端口的系统代理残留, 先清理, 避免停止时把死代理"还原"回去
+    if prev[0] and prev[1].startswith("127.0.0.1:") and not _proxy_alive(prev[1]):
+        log.warning("开启前检测到指向死端口的系统代理残留(%s), 先清理", prev[1])
+        _set_proxy_reg(0)
+        prev = (0, "")
+    _prev_proxy = prev
     _set_proxy_reg(1, f"127.0.0.1:{port}")
-    _we_enabled_proxy[0] = True
     log.info("系统代理已开启: 127.0.0.1:%s (之前: %s)", port, _prev_proxy)
 
 
+def _proxy_alive(addr: str) -> bool:
+    """检查代理地址目标端口是否存活"""
+    try:
+        host, port = addr.rsplit(":", 1)
+        with socket.socket() as s:
+            s.settimeout(1.5)
+            s.connect((host, int(port)))
+            return True
+    except Exception:
+        return False
+
+
 def disable_proxy(force: bool = False):
+    """关闭/还原系统代理。
+
+    - 正常路径: 还原"开启前"的原设置; 若原设置目标已不可达(死代理),
+      直接恢复直连并说明, 绝不把死代理还原回去。
+    - force=True(修复按钮/自愈): 无条件关闭系统代理。
+    - 既非 force 也无待还原状态时不动注册表(保护用户自己的代理)。
+    """
     global _prev_proxy
-    if not _we_enabled_proxy[0] and not force:
-        return  # 不是我们开的代理(或已恢复过), 不动它
-    _we_enabled_proxy[0] = False
+    if not force and _prev_proxy is None:
+        return  # 没有由本工具开启、待还原的代理
     prev = _prev_proxy
     _prev_proxy = None
-    if prev and prev[0]:
+    if prev and prev[0] and _proxy_alive(prev[1]):
         _set_proxy_reg(1, prev[1])  # 还原用户原本的代理设置
         log.info("系统代理已还原为用户原设置: %s", prev[1])
     else:
+        if prev and prev[0]:
+            log.warning("用户原代理设置(%s)已不可达, 恢复为直连", prev[1])
         _set_proxy_reg(0)
-        log.info("系统代理已关闭")
+        log.info("系统代理已关闭, 恢复直连")
 
 
 CERT_DIR = Path.home() / ".mitmproxy"
@@ -631,7 +655,7 @@ def heal_stale_proxy() -> bool:
     if not (OUR_PORT_RANGE[0] <= port <= OUR_PORT_RANGE[1]):
         return False
     _prev_proxy = None  # 残留状态不值得还原，直接关闭
-    disable_proxy()
+    disable_proxy(force=True)
     _stale_repaired[0] = True
     log.warning("检测到残留系统代理(127.0.0.1:%s), 已自动清理恢复网络", port)
     return True
@@ -877,7 +901,22 @@ async def api_export():
 
 @app.post("/api/repair")
 def api_repair():
-    disable_proxy()
+    """紧急修复: 无条件关闭系统代理 + 清理 PAC 自动配置"""
+    log.warning("用户点击「网络修复」: 强制关闭系统代理")
+    disable_proxy(force=True)
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, _INTERNET_SETTINGS, 0, winreg.KEY_SET_VALUE)
+        try:
+            winreg.DeleteValue(k, "AutoConfigURL")
+            log.info("已清除 PAC 自动配置 (AutoConfigURL)")
+        except FileNotFoundError:
+            pass
+        finally:
+            winreg.CloseKey(k)
+        _refresh_wininet()
+    except Exception:
+        pass
     return {"ok": True}
 
 
